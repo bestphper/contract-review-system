@@ -1,0 +1,32 @@
+# macOS / editor
+.DS_Store
+.idea/
+.vscode/
+.cursor/
+
+# .NET build and IDE output
+bin/
+obj/
+.vs/
+*.user
+*.suo
+
+# Frontend dependencies and TypeScript build cache
+frontend/node_modules/
+frontend/tsconfig.tsbuildinfo
+
+# Generated frontend deployment assets (rebuild with `cd frontend && npm run build`)
+wwwroot/
+
+# Runtime database and uploaded attachments
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/attachments/
+
+# Local environment and logs
+.env
+.env.*
+!.env.example
+*.log
+
