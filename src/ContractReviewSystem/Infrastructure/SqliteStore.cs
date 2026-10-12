@@ -230,6 +230,25 @@ INSERT OR IGNORE INTO user_roles(user_id,role_id) SELECT u.id,r.id FROM users u 
         await using var c = Open(); await c.OpenAsync(); await using var x = c.CreateCommand(); x.CommandText = "INSERT INTO rules(name,content) VALUES($name,$content); SELECT last_insert_rowid();"; Add(x, "$name", v.Name); Add(x, "$content", v.Content); var id = Convert.ToInt64(await x.ExecuteScalarAsync()); return new RuleDto(id, v.Name, v.Content, true);
     }
 
+    public async Task<IResult> UpdateRuleAsync(long id, RuleRequest v, string actor)
+    {
+        await using var c = Open(); await c.OpenAsync(); await using var tx = c.BeginTransaction(); await using var x = c.CreateCommand(); x.Transaction = tx;
+        x.CommandText = "UPDATE rules SET name=$name,content=$content,enabled=$enabled WHERE id=$id";
+        Add(x, "$id", id); Add(x, "$name", v.Name); Add(x, "$content", v.Content); Add(x, "$enabled", v.Enabled ? 1 : 0);
+        if (await x.ExecuteNonQueryAsync() == 0) return Results.NotFound();
+        await WriteAuditAsync(c, tx, actor, "编辑", "评审规则", id, v.Name); tx.Commit();
+        return Results.Ok(new RuleDto(id, v.Name, v.Content, v.Enabled));
+    }
+
+    public async Task<IResult> DeleteRuleAsync(long id, string actor)
+    {
+        await using var c = Open(); await c.OpenAsync(); await using var tx = c.BeginTransaction(); await using var x = c.CreateCommand(); x.Transaction = tx;
+        x.CommandText = "SELECT name FROM rules WHERE id=$id"; Add(x, "$id", id); var name = (string?)await x.ExecuteScalarAsync();
+        if (name is null) return Results.NotFound();
+        x.Parameters.Clear(); x.CommandText = "DELETE FROM rules WHERE id=$id"; Add(x, "$id", id); await x.ExecuteNonQueryAsync();
+        await WriteAuditAsync(c, tx, actor, "删除", "评审规则", id, name); tx.Commit(); return Results.Ok(new { deleted = true });
+    }
+
     public async Task<IReadOnlyList<DepartmentDto>> ListDepartmentsAsync()
     {
         await using var c = Open(); await c.OpenAsync(); await using var x = c.CreateCommand(); x.CommandText = "SELECT d.id,d.parent_id,d.name,d.code,d.manager,d.enabled,(SELECT COUNT(*) FROM user_departments ud WHERE ud.department_id=d.id) member_count FROM departments d ORDER BY d.id";
