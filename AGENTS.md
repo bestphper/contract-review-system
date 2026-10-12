@@ -36,7 +36,7 @@ bin/ obj/                                     # .NET 构建产物
 
 - `Program.cs` 只负责路由映射和会话校验（`Current`/`Require`/`RequirePermission` 本地函数）：读 `cr_session` Cookie → 查内存 `sessions` 字典 → 未登录返回 401；`Require*` 内部直接 `result.ExecuteAsync(ctx)` 写出响应（返回 `Task` 而非 `Task<IResult>`）。**注意**：单 `HttpContext` 参数的 async lambda 若返回 `Task<IResult>` 会被编译器推断为 `RequestDelegate`，返回值被静默丢弃（空 200，ASP0016 警告）——所以 `Require*` 自己执行结果，路由一律写成 `{ await Require(...); }` 语句体。
 - 会话和验证码都是**进程内内存**（`ConcurrentDictionary`），重启即失效，不适用于多实例部署。
-- 合同状态机：`草稿 → 评审中 → 已通过`（`ChangeAsync` 白名单校验），`评审中 → 已驳回`（`RejectAsync`，同事务写入 `reviews` 评审意见）。
+- 合同状态机：由 `SqliteStore.Actions` 字典（12 个动作）统一描述，`WorkflowActionAsync` 按 `From` 状态与所需权限校验，未知动作返回 400；流转历史与评审意见同事务写入 `contract_workflow_history`。简化接口 `ChangeAsync`/`RejectAsync` 只是转发到 `WorkflowActionAsync`（`submit`/`review-pass`/`reject`）。
 - 附件采用软删除（`deleted_at`），文件落盘 `data/attachments/{contractId}/{guid}{ext}`，版本号自增。
 - 启动时 `InitializeAsync` 会**重置 admin 密码为 `admin`**（演示性质），并 `INSERT OR IGNORE` 种子部门/角色/权限/主体/通知。
 - 首次启动还会自动写入全套演示数据集（`SeedDemoDataAsync`，幂等：检测到合同《数据中心服务器采购合同》即跳过）：36 份合同覆盖状态机全部 11 种状态并配套流程历史/评审意见/节点/通知/审计日志，另有 12 个业务用户、10 个签约主体、8 条评审规则、带真实磁盘文件的附件。数据库文件被删除后重启即可重新生成。
@@ -50,7 +50,7 @@ dotnet restore
 dotnet run --urls http://localhost:5080
 ```
 
-前端开发（另开终端；Vite 端口 5173，`/api` 代理到 5080）：
+前端开发（另开终端；Vite 端口 5177，`/api` 代理到 5080）：
 
 ```bash
 cd frontend
@@ -85,10 +85,11 @@ cd frontend && npm run build
 ## 安全注意事项（按现状如实描述，改动时需意识到）
 
 - 密码使用**未加盐 SHA256** 存储（`Security.Hash`），属演示级实现，勿在生产使用。
-- 权限表（roles/permissions/role_permissions）存在且有种子和查询方法 `HasPermissionAsync`，但**目前没有任何路由调用它**——所有登录用户都能访问所有接口。
+- 权限校验已接入路由：写操作与敏感读取通过 `RequirePermission(ctx, permission, ...)` 校验权限点（`HasPermissionAsync`），角色名为 `系统管理员` 的用户直接放行，其余用户按 `role_permissions` 判定；只读接口仅用 `Require` 校验登录。部分写接口（如 `POST /api/contracts/{id}/milestones`、`POST /api/notifications/{id}/read`）目前只校验登录，未细分权限点。
 - 默认凭据 `admin`/`admin` 且每次启动被重置。
+- 会话与验证码都是**进程内内存**（`ConcurrentDictionary`），重启即失效，不支持多实例部署。
 - 附件上传只校验非空，无类型/大小限制。
-- `/api/backup` 会直接下载整库文件，仅登录即可。
+- `GET /api/backup` 需要 `backup.download` 权限，通过后会直接下载整库文件。
 
 ## 部署
 
